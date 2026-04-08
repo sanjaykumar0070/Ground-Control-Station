@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Drone Map</title>
+
+    <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.2.0/maptiler-sdk.umd.min.js"></script>
+    <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.2.0/maptiler-sdk.css" rel="stylesheet" />
+
+    <style>
+        html, body, #map {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<script>
+    let map = null;
+    let droneMarkers = {};
+
+    window.mapReady = false;
+
+    function initializeMap() {
+        if (typeof maptilersdk === "undefined") {
+            console.error("MapTiler SDK failed to load");
+            return;
+        }
+
+        maptilersdk.config.apiKey = "1HDRmIHMwet0RXkNbYjF";
+
+        map = new maptilersdk.Map({
+            container: 'map',
+            style: maptilersdk.MapStyle.STREETS,
+            center: [78.4867, 17.4933],
+            zoom: 14
+        });
+
+        window.mapReady = true;
+        console.log("Map initialized successfully");
+    }
+
+    window.onload = initializeMap;
+
+    function updateDroneMarker(droneId, lat, lon) {
+        if (!window.mapReady || !map) return;
+
+        if (droneMarkers[droneId]) {
+            droneMarkers[droneId].setLngLat([lon, lat]);
+        } else {
+            droneMarkers[droneId] = new maptilersdk.Marker()
+                .setLngLat([lon, lat])
+                .addTo(map);
+        }
+    }
+
+    function centerDrone(lat, lon) {
+        if (!window.mapReady || !map) return;
+
+        map.flyTo({
+            center: [lon, lat],
+            zoom: 16
+        });
+    }
+
+    function fitAllDrones(droneList) {
+        if (!window.mapReady || !map || droneList.length === 0) return;
+
+        const bounds = new maptilersdk.LngLatBounds();
+
+        droneList.forEach(drone => {
+            bounds.extend([drone.lon, drone.lat]);
+        });
+
+        map.fitBounds(bounds, { padding: 50 });
+    }
+</script>
+
+</body>
+</html>
