@@ -2,11 +2,13 @@ import os
 import sys
 import threading
 
+from datetime import datetime
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QHBoxLayout, QVBoxLayout, QGridLayout,
     QPushButton, QLabel, QCheckBox,
-    QFrame, QLineEdit
+    QFrame, QLineEdit, QTextEdit
 )
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QFont
@@ -14,6 +16,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from drone_manager import DroneManager
 from drone_actions import (
+    change_mode,
     arm_drone,
     disarm_drone,
     takeoff_drone,
@@ -299,14 +302,23 @@ class GCSMainWindow(QMainWindow):
         self.right_layout.addLayout(takeoff_layout)
         self.right_layout.addWidget(self.land_btn)
 
+        self.action_log = QTextEdit()
+        self.action_log.setReadOnly(True)
+        self.action_log.setMinimumHeight(200)
+
+        self.right_layout.addWidget(QLabel("Command Logs"))
+        self.right_layout.addWidget(self.action_log)
+
         return self.right_frame
     
     def change_selected_mode(self, mode_name):
-        # if not self.selected_drone:
-        #     self.log_action("No drone selected")
-        #     return
+        if not self.selected_drone:
+            self.log_action("No drone selected")
+            return
 
         vehicle = self.vehicles[self.selected_drone]
+
+        self.log_action(f"Mode change requested: {mode_name}")
 
         thread = threading.Thread(
             target=self._mode_worker,
@@ -316,14 +328,25 @@ class GCSMainWindow(QMainWindow):
         thread.start()
 
     def _mode_worker(self, vehicle, mode_name):
-        from drone_actions import change_mode
+        try:
+            success = change_mode(vehicle, mode_name)
 
-        success = change_mode(vehicle, mode_name)
-
-        # if success:
-        #     self.log_action(f"Mode changed to {mode_name}")
-        # else:
-        #     self.log_action(f"Failed to change mode to {mode_name}")
+            if success:
+                self.log_action(
+                    f"Mode changed to {mode_name}",
+                    "SUCCESS"    
+                )
+            else:
+                self.log_action(
+                    f"Failed to change mode to {mode_name}",
+                    "ERROR"
+                )
+        
+        except Exception as e:
+            self.log_action(
+                f"Mode change error: {str(e)}",
+                "ERROR"
+            )
 
         QTimer.singleShot(
             500,
@@ -332,22 +355,57 @@ class GCSMainWindow(QMainWindow):
 
     def toggle_arm_disarm(self):
         if not self.selected_drone:
-            print("No drone selected")
+            self.log_action("No drone selected", "ERROR")
             return
 
         vehicle = self.vehicles[self.selected_drone]
 
-        def task():
-            if vehicle.armed:
-                disarm_drone(vehicle)
-            else:
-                arm_drone(vehicle)
+        if vehicle.armed:
+            self.log_action(f"{self.selected_drone}: Disarm clicked")
+        else:
+            self.log_action(f"{self.selected_drone}: Arm clicked")
 
-        thread = threading.Thread(target=task, daemon=True)
+        thread = threading.Thread(
+            target=self._arm_disarm_worker,
+            args=(vehicle,),
+            daemon=True
+        )
         thread.start()
 
-        # refresh UI after small delay
-        QTimer.singleShot(2000, self.update_arm_button_ui)
+    def _arm_disarm_worker(self, vehicle):
+        try:
+            if vehicle.armed:
+                success = disarm_drone(vehicle)
+
+                if success:
+                    self.log_action(
+                        "Drone disarmed successfully", 
+                        "SUCCESS"
+                    )
+                else:
+                    self.log_action(
+                        "Failed to disarm drone", 
+                        "ERROR"
+                    )
+
+            else:
+                success, reason = arm_drone(vehicle)
+
+                if success:
+                    self.log_action(reason, "SUCCESS")
+                else:
+                    self.log_action(
+                        f"Arm failed: {reason}",
+                        "ERROR"
+                    )
+
+        except Exception as e:
+            self.log_action(
+                f"Arm/Disarm error: {str(e)}", 
+                "ERROR"
+            )
+
+        QTimer.singleShot(500, self.update_arm_button_ui)
 
     def update_arm_button_ui(self):
         if not self.selected_drone:
@@ -369,32 +427,69 @@ class GCSMainWindow(QMainWindow):
     # ACTION BUTTONS
     def takeoff_selected_drone(self):
         if not self.selected_drone:
-            print("No drone selected")
+            self.log_action("No drone selected for takeoff", "ERROR")
             return
 
         vehicle = self.vehicles[self.selected_drone]
 
+        if vehicle.mode.name != "GUIDED":
+            self.log_action(
+                "Takeoff allowed only in GUIDED mode",
+                "WARNING"
+            )
+            return
+
         try:
             altitude = float(self.altitude_input.text())
         except ValueError:
-            print("Invalid altitude")
+            self.log_action("Invalid altitude entered", "ERROR")
             return
 
+        self.log_action(
+                f"Takeoff initiated to {altitude} meters"
+            )
+
         thread = threading.Thread(
-            target=takeoff_drone,
+            target=self._takeoff_worker,
             args=(vehicle, altitude),
             daemon=True
         )
         thread.start()
-        
+            
+    def _takeoff_worker(self, vehicle, altitude):
+        try:
+            takeoff_drone(vehicle, altitude)
+
+            self.log_action(
+                f"Reached target altitude: {altitude} m",
+                "SUCCESS"
+            )
+
+        except Exception as e:
+            self.log_action(
+                f"Takeoff failed: {str(e)}",
+                "ERROR"
+            )
+
     def land_selected_drone(self):
         if not self.selected_drone:
+            self.log_action("No drone selected for landing", "ERROR")
             return
         
-        if self.selected_drone:
-            print(f"Landing drone {self.selected_drone}")
+        try:
             vehicle = self.vehicles[self.selected_drone]
+
+            self.log_action("Land clicked")
+
             land_drone(vehicle)
+
+            self.log_action("Landing initiated", "SUCCESS")
+
+        except Exception as e:
+            self.log_action(
+                f"Landing failed: {str(e)}",
+                "ERROR"
+            )
 
         QTimer.singleShot(1000, self.update_arm_button_ui)
 
@@ -403,6 +498,10 @@ class GCSMainWindow(QMainWindow):
         vehicle = self.vehicles.get(drone_id)
 
         if not vehicle:
+            self.log_action(
+                f"{drone_id} telemetry unavailable",
+                "ERROR"
+            )
             return
         
         self.selected_drone = drone_id
@@ -437,6 +536,22 @@ class GCSMainWindow(QMainWindow):
 
         # Update arm/disarm color state
         self.update_arm_button_ui()
+
+    def log_action(self, message, level="INFO"):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        if level == "ERROR":
+            prefix = "❌"
+        elif level == "SUCCESS":
+            prefix = "✅"
+        elif level == "WARNING":
+            prefix = "⚠️"
+        else:
+            prefix = "ℹ️"
+
+        self.action_log.append(
+            f"[{timestamp}] {prefix} [{level}] {message}"
+        )
 
     def select_drone_and_center(self, drone_id):
         self.update_right_panel(drone_id)
