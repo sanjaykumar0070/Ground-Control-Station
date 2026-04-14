@@ -87,10 +87,40 @@ class GCSMainWindow(QMainWindow):
         title.setFont(QFont("Arial", 14, QFont.Bold))
         layout.addWidget(title)
 
-        refresh_btn = QPushButton("🔄 Refresh Devices")
-        refresh_btn.setFixedHeight(40)
-        refresh_btn.clicked.connect(self.refresh_connected_devices)
-        layout.addWidget(refresh_btn)
+        # ===============================
+        # CONNECTION SECTION
+        # ===============================
+
+        top_controls_layout = QHBoxLayout()
+
+        self.connection_input = QLineEdit()
+        self.connection_input.setPlaceholderText("Enter connection string")
+        self.connection_input.setText("udp:127.0.0.1:14550")
+        self.connection_input.setFixedHeight(40)
+
+        self.connect_btn = QPushButton("Connect")
+        self.connect_btn.setFixedHeight(40)
+        self.connect_btn.clicked.connect(self.connect_drone_from_input)
+
+        top_controls_layout.addWidget(self.connection_input, 3)
+        top_controls_layout.addWidget(self.connect_btn, 1)
+
+        layout.addLayout(top_controls_layout)
+
+        # ===============================
+        # REFRESH BUTTON BELOW
+        # ===============================
+
+        refresh_layout = QHBoxLayout()
+
+        self.refresh_btn = QPushButton("🔄 Refresh Devices")
+        self.refresh_btn.setFixedHeight(40)
+        self.refresh_btn.clicked.connect(self.refresh_connected_devices)
+
+        refresh_layout.addStretch()
+        refresh_layout.addWidget(self.refresh_btn)
+
+        layout.addLayout(refresh_layout)
 
         # Grid for drones
         self.drone_grid = QGridLayout()
@@ -185,6 +215,55 @@ class GCSMainWindow(QMainWindow):
                 row += 1
 
         print("Refresh completed")
+
+    def connect_drone_from_input(self):
+        connection_string = self.connection_input.text().strip()
+
+        if not connection_string:
+            self.log_action("Please enter connection string", "WARNING")
+            return
+
+        self.log_action(
+            f"Connection requested: {connection_string}",
+            "INFO"
+        )
+
+        thread = threading.Thread(
+            target=self._connect_drone_worker,
+            args=(connection_string,),
+            daemon=True
+        )
+        thread.start()
+
+    def _connect_drone_worker(self, connection_string):
+        try:
+            drone_id, vehicle = self.drone_manager.connect_single_drone(
+                connection_string
+            )
+
+            if vehicle:
+                self.vehicles = self.drone_manager.get_connected_drones()
+
+                QTimer.singleShot(
+                    0,
+                    self.refresh_connected_devices
+                )
+
+                self.log_action(
+                    f"{drone_id} connected successfully",
+                    "SUCCESS"
+                )
+            else:
+                self.log_action(
+                    "Connection failed",
+                    "ERROR"
+                )
+
+        except Exception as e:
+            self.log_action(
+                f"Connection error: {str(e)}",
+                "ERROR"
+            )
 
     # MIDDLE PANEL
     def create_middle_panel(self):
